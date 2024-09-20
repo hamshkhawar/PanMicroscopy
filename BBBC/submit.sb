@@ -1,0 +1,14 @@
+#!/bin/bash -l
+#SBATCH --job-name=BC022    # Job name
+#SBATCH -p priority_gpu        # Partition name
+#SBATCH --output=my_job_output.txt  # Standard output and error log
+#SBATCH --error=my_job_error.txt    # Error log file
+#SBATCH --nodes=1                   # Number of nodes
+#SBATCH --nodelist=gpu02                 # Number of nodes
+#SBATCH --ntasks=50                  # Number of tasks (processes)
+#SBATCH --cpus-per-task=1           # Number of CPU cores per task
+
+
+conda activate myenv
+
+python bbbc.py --inpDir=/projects/PanMicroscopy/data/BBBC --name=BBBC022 --filePattern=".*.tif" --outFilePattern="x" --outDir=/projects/PanMicroscopy/NyxusFeatures/BBBC
