@@ -1,0 +1,6 @@
+/projects/PanMicroscopy/data/tissueNet/v1.0/standard/test/intensity
+/projects/PanMicroscopy/data/tissueNet/v1.0/standard/train/intensity
+/projects/PanMicroscopy/data/tissueNet/v1.0/standard/val/intensity
+/projects/PanMicroscopy/data/tissueNet/v1.1/standard/test/intensity
+/projects/PanMicroscopy/data/tissueNet/v1.1/standard/train/intensity
+/projects/PanMicroscopy/data/tissueNet/v1.1/standard/val/intensity

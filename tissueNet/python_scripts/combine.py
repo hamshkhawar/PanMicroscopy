@@ -18,7 +18,6 @@ logger = logging.getLogger("Combine tissueNet dataset")
 logger.setLevel(os.environ.get("POLUS_LOG", logging.INFO))
 
 
-
 def metadata_extraction(x, version):
 
     images = x['intensity_image'].tolist()
@@ -33,14 +32,14 @@ def metadata_extraction(x, version):
         tissue = [r.group("tissue") for r in match]
         channel = [r.group("channel") for r in match]
 
-        x['tissue'] = np.array(tissue)
+        x['cell'] = np.array(tissue)
         x['platform'] = np.array(platform)
-        x['channel'] = np.array(channel)
+        x['channelnumber'] = np.array(channel)
 
         # Flip the dictionary
         tissue_dict = {value: key for key, value in tissue_dict.items()}
         platform_dict = {value: key for key, value in platform_dict.items()}
-        x['tissue'] = x['tissue'].map(tissue_dict)
+        x['cell'] = x['cell'].map(tissue_dict)
         x['platform'] = (x['platform']
                         .map(platform_dict)
                         )
@@ -65,15 +64,15 @@ def metadata_extraction(x, version):
         tissue = [r.group("tissue") for r in match]
         channel = [r.group("channel") for r in match]
 
-        x['tissue'] = np.array(tissue)
+        x['cell'] = np.array(tissue)
         none_values = np.array([None] * len(x))
         x['platform'] =  none_values
-        x['channel'] = np.array(channel)
+        x['channelnumber'] = np.array(channel)
 
 
         # Flip the dictionary
         tissue_dict = {value: key for key, value in tissue_dict.items()}
-        x['tissue'] = x['tissue'].map(tissue_dict)
+        x['cell'] = x['cell'].map(tissue_dict)
 
 
     
@@ -109,22 +108,32 @@ def main(
 
     df_v10 = []
     df_v11 = []
-
+    dataset="tissueNet"
     for inp in inp_dir.rglob("*.arrow"):
-        version = inp.parents[2].name
+        version = inp.parents[3].name
         if version == "v1.0":
-            dirname = inp.parents[0].name
-            df = vaex.open(inp)
-            df['version'] = np.repeat(version, df.shape[0])
-            df['dataset'] = np.repeat(dirname, df.shape[0])
-            df_v10.append(df)
+            image_path = str(inp.parent).replace("NyxusFeatures", "data")
+            experiment=inp.parents[1].name
+            x_df = vaex.open(inp)
+            x_df['path'] =  np.array([image_path] * len(x_df))
+            x_df['path'] = x_df['path'] + '/' + x_df['intensity_image ']
+            x_df['dataset'] =  np.array([dataset] * len(x_df))
+            x_df['experiment'] =  np.array([experiment] * len(x_df))
+            x_df['plate'] =  np.array([None] * len(x_df))
+            x_df['version'] = np.array([version] * len(x_df))
+            df_v10.append(x_df)
 
         if version == "v1.1":
-            dirname = inp.parents[0].name
-            df = vaex.open(inp)
-            df['version'] = np.repeat(version, df.shape[0])
-            df['dataset'] = np.repeat(dirname, df.shape[0])
-            df_v11.append(df)
+            image_path = str(inp.parent).replace("NyxusFeatures", "data")
+            experiment=inp.parents[1].name
+            x_df = vaex.open(inp)
+            x_df['path'] =  np.array([image_path] * len(x_df))
+            x_df['path'] = x_df['path'] + '/' + x_df['intensity_image ']
+            x_df['dataset'] =  np.array([dataset] * len(x_df))
+            x_df['experiment'] =  np.array([experiment] * len(x_df))
+            x_df['plate'] =  np.array([None] * len(x_df))
+            x_df['version'] = np.array([version] * len(x_df))
+            df_v11.append(x_df)
 
         
     df_v10 = vaex.concat(df_v10)
@@ -136,11 +145,54 @@ def main(
     df_v11 = metadata_extraction(df_v11, version="v1.1")
     logger.info(f'Combined features for dataset: v1.1')
 
-    df_concat = vaex.concat([df_v10, df_v11])
+    x = vaex.concat([df_v10, df_v11])
 
-    output_file = out_dir.joinpath("combined_tissueNet.arrow")
+    x['well'] =  np.array([None] * len(x))
+    x['site'] = np.array([None] * len(x))
+    x['wellnumber'] =  np.array([None] * len(x))
+    x['channelnumber'] = np.array([None] * len(x))
+    x['z_position'] =  np.array([None] * len(x))
+    x['perturbation_id'] = np.array([None] * len(x))
+    x['partition'] = np.array([None] * len(x))
+    x['version'] = np.array([None] * len(x))
+    x['channelname'] = np.array([None]* len(x))
+    x['control_type'] =np.array([None] * len(x))
+    x['dose'] = np.array([None]* len(x))
+    x['smiles'] = np.array([None] * len(x))
+    x['disease_condition'] = np.array([None] * len(x))
+    x['organism'] = np.array([None] * len(x))
+    x['modality'] = np.array(["Optical Imaging"] * len(x))
+    x['experimental_technique'] = np.array(["TissueNet dataset for training models on nuclear and whole cell segmentation in tissue images."] * len(x))
 
-    df_concat.export_feather(output_file)
+    metcols = ['path','dataset','experiment',
+        'plate',
+        'well',
+        'site',
+        'wellnumber',
+        'channelnumber',
+        'z_position',
+        'perturbation_id',
+        'partition',
+        'version',
+        'platform',
+        'channelname',
+        'control_type',
+        'dose',
+        'smiles',
+        'disease_condition',
+        'organism',
+        'cell',
+        'modality',
+        'experimental_technique']
+
+    newcolumns = x.column_names[:473] + metcols
+    x =x[newcolumns]
+
+    if not Path(out_dir).exists():
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    x.export_feather(out_dir.joinpath(f"{dataset}.arrow"))
+
 
     finishtime = (time.time() - starttime) / 60
     logger.info(f'total time taken in minutes {finishtime}')
