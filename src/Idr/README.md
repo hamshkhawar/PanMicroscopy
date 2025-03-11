@@ -77,3 +77,20 @@ python idr_metadata_model.py --root <root-path> --name <dataset-name> --outDir <
     ├── annotations.csv
     └── ...
 ```
+
+## Path Validator and File Counter
+This Python script processes a CSV file containing plate IDs and file paths, validates the existence of each path, counts files recursively, and updates paths if they’re not found.
+
+
+## Overview
+
+* Reads a `CSV` file with PlateID and Path columns
+* Checks if each path exists.
+* Counts files recursively in each directory.
+* Searches recursively for updated paths if the original doesn’t exist.
+* Outputs `CSV` file with Updated paths, subdirectories with file counts
+
+
+```bash
+python idr_validation_model.py --inFile /path/to/plates.csv
+```
