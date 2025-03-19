@@ -1,3 +1,7 @@
+"""
+A script to fetch and process TSV/CSV files from a GitHub repository, including submodules.
+"""
+
 from github import Github, GithubException
 from pydantic import BaseModel
 from typing import Optional
@@ -11,15 +15,13 @@ import gzip
 import requests
 import os
 
-
 app = typer.Typer()
 
 # Set up logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-ACCESS_TOKEN=os.environ.get("ACCESS_TOKEN")
-
+ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
 
 class Submodule(BaseModel):
     path: str
@@ -27,7 +29,7 @@ class Submodule(BaseModel):
     commit_hash: str
 
 class GitHubRepo:
-    def __init__(self, access_token: str, repo_name: str, out_dir: Path, root:Path):
+    def __init__(self, access_token: str, repo_name: str, out_dir: Path, root: Path):
         self.github = Github(access_token)
         self.repo = self.github.get_repo(repo_name)
         self.out_dir = out_dir
@@ -48,21 +50,28 @@ class GitHubRepo:
     def _decode_content(self, content_file) -> str:
         """Decode content based on its encoding."""
         logging.info(f"Decoding content for {content_file.path}, encoding: {content_file.encoding}")
-        if content_file.encoding == "base64":
-            decoded = base64.b64decode(content_file.content).decode('utf-8')
-            logging.info(f"Base64 decoded content size: {len(decoded)} bytes")
-            return decoded
-        elif content_file.encoding == "none":
-            logging.info(f"Content with 'none' encoding, raw size: {len(content_file.content)} bytes")
-            logging.info(f"Content preview: {content_file.content[:100]}")
-            return content_file.content  
-        else:
-            raise ValueError(f"Unsupported encoding: {content_file.encoding}")
+        try:
+            if content_file.encoding == "base64":
+                decoded_bytes = base64.b64decode(content_file.content)
+                decoded_str = decoded_bytes.decode('utf-8', errors='replace')
+                if not decoded_str.strip():
+                    logging.warning(f"Empty content after base64 decoding for {content_file.path}")
+                logging.info(f"Base64 decoded content size: {len(decoded_str)} bytes")
+                return decoded_str
+            elif content_file.encoding == "none":
+                logging.info(f"Content with 'none' encoding, raw size: {len(content_file.content)} bytes")
+                logging.info(f"Content preview: {content_file.content[:100]}")
+                return content_file.content.decode('utf-8', errors='replace')
+            else:
+                raise ValueError(f"Unsupported encoding: {content_file.encoding}")
+        except Exception as e:
+            logging.error(f"Decoding failed for {content_file.path}: {e}")
+            return ""
 
     def _fetch_raw_content(self, repo_name: str, path: str, ref: str) -> bytes:
         """Fallback method to fetch raw content directly from GitHub."""
         url = f"https://raw.githubusercontent.com/{repo_name}/{ref}/{path}"
-        headers = {"Authorization": f"token {self.access_token}"}
+        headers = {"Authorization": f"token {self.access_token}", "Accept": "application/vnd.github.v3.raw"}
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
             content = response.content
@@ -96,7 +105,7 @@ class GitHubRepo:
                 return element.sha
         logging.info(f"Commit hash for submodule '{target_submodule}' not found.")
         return None
-    
+
     def process_csv_file(self, file_content: bytes, file_path: Path, is_gzipped: bool = False) -> Optional[pd.DataFrame]:
         """Process CSV file content (regular or gzipped) and save to disk."""
         try:
@@ -104,31 +113,29 @@ class GitHubRepo:
             if not file_content:
                 logging.warning(f"Skipping {file_path.name}: Empty content")
                 return None
-                
+
             if is_gzipped:
                 with gzip.open(BytesIO(file_content), 'rt', encoding='utf-8') as f:
                     df = pd.read_csv(f)
             else:
                 df = pd.read_csv(BytesIO(file_content))
-            
+
             if df.empty:
                 logging.warning(f"Skipping {file_path.name}: No data parsed from CSV")
                 return None
-                
+
             df.to_csv(file_path, index=False)
             logging.info(f"Saved CSV to {file_path}")
             return df
         except Exception as e:
             logging.error(f"Error processing CSV file {file_path}: {e}")
             return None
-        
+
     def modify_path(self, path):
         if "/uod/idr/filesets/" in path:
-            # Update the path based on the condition
             new_path = Path(self.root) / path.split("filesets/")[1]
             return str(Path(new_path).parent)
         else:
-            # Update the path when "../" is found
             new_path = Path(self.root) / path.split("../", 1)[-1]
             return str(Path(new_path).parent)
 
@@ -147,7 +154,7 @@ class GitHubRepo:
                 if element.type == "tree":
                     logging.info(f"Scanning directory: {element.path}")
                     dir_contents = submodule_repo.get_contents(element.path, ref=submodule.commit_hash)
-                    
+
                     for subfile in dir_contents:
                         logging.info(f"Examining file: {subfile.path}")
                         # Handle TSV files
@@ -162,45 +169,45 @@ class GitHubRepo:
                             df = pd.read_csv(file_data, sep='\t', header=None)
                             df.rename(columns={df.columns[0]: 'PlateID', df.columns[1]: 'Path'}, inplace=True)
                             df['Path'] = df['Path'].apply(self.modify_path)
-                            outpath = self.out_dir.joinpath(f"plates")
+                            outpath = self.out_dir.joinpath("plates")
                             if not Path(outpath).exists():
                                 Path(outpath).mkdir(parents=True, exist_ok=True)
-                                
-                            plate_path=outpath.joinpath(f"{Path(subfile.name).stem}.csv")
+                            plate_path = outpath.joinpath(f"{Path(subfile.name).stem}.csv")
                             df.to_csv(plate_path, index=False)
-                        
+
                         # Handle CSV files (both regular and gzipped)
                         elif subfile.name.endswith(("annotation.csv", "annotation.csv.gz", "annotations.csv")):
                             logging.info(f"Found CSV file: {subfile.name}")
                             file_content_obj = submodule_repo.get_contents(subfile.path, ref=submodule.commit_hash)
-                            logging.info(f"Raw content object retrieved for {subfile.name}")
-                            file_content = (self._decode_content(file_content_obj).encode('utf-8') 
-                                          if not subfile.name.endswith(".gz") 
-                                          else file_content_obj.decoded_content)
-                            logging.info(f"Content prepared for {subfile.name}, size: {len(file_content)} bytes")
-                            if not file_content:
-                                logging.warning(f"Content empty after decoding, attempting raw fetch for {subfile.name}")
+                            is_gzipped = subfile.name.endswith(".gz")
+                            
+                            if is_gzipped:
+                                # For gzipped files, fetch raw content directly as GitHub API might not decode correctly
                                 file_content = self._fetch_raw_content(submodule_repo_name, subfile.path, submodule.commit_hash)
-                                
-                            outpath = self.out_dir.joinpath(f"annotations")
+                            else:
+                                file_content = self._decode_content(file_content_obj).encode('utf-8')
+
+                            if not file_content:
+                                logging.warning(f"Content empty after initial fetch for {subfile.name}, attempting raw fetch")
+                                file_content = self._fetch_raw_content(submodule_repo_name, subfile.path, submodule.commit_hash)
+
+                            outpath = self.out_dir.joinpath("annotations")
                             if not Path(outpath).exists():
                                 Path(outpath).mkdir(parents=True, exist_ok=True)
-                            
                             file_path = outpath.joinpath(subfile.name)
-                            
+
                             # Save raw content first
                             with open(file_path, 'wb') as f:
                                 f.write(file_content)
                             logging.info(f"Saved raw content to {file_path}")
-                            
+
                             # Process and convert to DataFrame
-                            is_gzipped = subfile.name.endswith(".gz")
                             df = self.process_csv_file(file_content, file_path, is_gzipped)
                             if df is not None:
                                 logging.info(f"Successfully processed and saved CSV: {subfile.name}")
 
-            return 
-            
+            return
+
         except GithubException as e:
             logging.error(f"Error retrieving contents for submodule '{submodule.path}' at commit {submodule.commit_hash}: {e}")
             return None
@@ -213,7 +220,7 @@ class GitHubRepo:
             if content_file.type == "dir":
                 subdir_contents = self.repo.get_contents(content_file.path)
                 for subfile in subdir_contents:
-                    if subfile.name.endswith("filePaths.tsv") or subfile.name.endswith("plates.tsv"):
+                    if subfile.name.endswith(("filePaths.tsv", "plates.tsv")):
                         logging.info(f"Found TSV file: {subfile.name}")
                         tsv_content = self.repo.get_contents(subfile.path)
                         file_content = self._decode_content(tsv_content)
@@ -224,38 +231,38 @@ class GitHubRepo:
                         df = pd.read_csv(file_data, sep='\t', header=None)
                         df.rename(columns={df.columns[0]: 'PlateID', df.columns[1]: 'Path'}, inplace=True)
                         df['Path'] = df['Path'].apply(self.modify_path)
-                        outpath = self.out_dir.joinpath(f"plates")
+                        outpath = self.out_dir.joinpath("plates")
                         if not Path(outpath).exists():
                             Path(outpath).mkdir(parents=True, exist_ok=True)
-                                
-                        plate_path=outpath.joinpath(f"{Path(subfile.name).stem}.csv")
+                        plate_path = outpath.joinpath(f"{Path(subfile.name).stem}.csv")
                         df.to_csv(plate_path, index=False)
                     elif subfile.name.endswith(("annotation.csv", "annotation.csv.gz", "annotations.csv")):
                         logging.info(f"Found CSV file: {subfile.name}")
                         file_content_obj = self.repo.get_contents(subfile.path)
-                        file_content = (self._decode_content(file_content_obj).encode('utf-8') 
-                                      if not subfile.name.endswith(".gz") 
-                                      else file_content_obj.decoded_content)
-                        if not file_content:
-                            logging.warning(f"Content empty after decoding, attempting raw fetch for {subfile.name}")
+                        is_gzipped = subfile.name.endswith(".gz")
+
+                        if is_gzipped:
                             file_content = self._fetch_raw_content(self.repo.full_name, subfile.path, self.repo.default_branch)
-                            
-                        outpath = self.out_dir.joinpath(f"annotations")
+                        else:
+                            file_content = self._decode_content(file_content_obj).encode('utf-8')
+
+                        if not file_content:
+                            logging.warning(f"Content empty after initial fetch for {subfile.name}, attempting raw fetch")
+                            file_content = self._fetch_raw_content(self.repo.full_name, subfile.path, self.repo.default_branch)
+
+                        outpath = self.out_dir.joinpath("annotations")
                         if not Path(outpath).exists():
                             Path(outpath).mkdir(parents=True, exist_ok=True)
-                            
                         file_path = outpath.joinpath(subfile.name)
-                        
+
                         with open(file_path, 'wb') as f:
                             f.write(file_content)
-                        
-                        is_gzipped = subfile.name.endswith(".gz")
+
                         df = self.process_csv_file(file_content, file_path, is_gzipped)
                         if df is not None:
                             logging.info(f"Successfully processed and saved CSV: {subfile.name}")
 
-        return 
-
+        return
 
 @app.command()
 def main(
@@ -285,7 +292,6 @@ def main(
         dir_okay=True,
     ),
 ):
-    
     github_repo = GitHubRepo(ACCESS_TOKEN, 'IDR/idr-metadata', out_dir, root)
     gitmodules_content = github_repo.get_gitmodules_content()
 
