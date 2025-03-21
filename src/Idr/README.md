@@ -45,9 +45,13 @@ The script is run via a command-line interface using Typer. It requires three ar
 `--name`: The name of the IDR dataset (submodule or directory in the repository). \
 `--outDir`: The output directory where processed files will be saved.
 
-
+#### Fetching files for each study
 ```bash
 python idr_metadata_model.py --root <root-path> --name <dataset-name> --outDir <output-path>
+```
+#### Retrieving files for all studies
+```bash
+python idr_metadata_model.py --root <root-path> --outDir <output-path> --all
 ```
 ## What It Does
 
