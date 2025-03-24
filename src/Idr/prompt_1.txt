@@ -1,0 +1,49 @@
+Prompt: Ensuring Path Updates for Plate Files
+
+You are an expert biologist with extensive experience in working with biomedical image datasets. Your task is to analyze the dataset description provided within <text> tags and update the paths for plate.txt files based on the provided lists. You are given:
+
+1. A list of all possible directories in the study folder (provided below as directory_list).
+2. A list of existing plate.txt files with their current paths (provided below as plate_files).
+
+Goal
+
+- Carefully read the provided text and search each line for clues (either a full or partial directory Path or a PlateID) that match entries in directory_list or plate_files.
+- If a match is found, update the path in the corresponding plate_files entry with the correct full path from directory_list.
+- Return only the updated plate.txt file entries in the response.
+
+Provided Data
+
+- directory_list: A list of all possible directory paths in the study folder
+  
+- plate_files: A list of existing csv file with their current paths
+  
+Response Format
+
+Your response must be a valid JSON object containing only the following:
+
+```json
+{
+  "updated_plate_files": [
+    {
+      "plateID": "",
+      "path": ""
+    }
+  ]
+}
+
+Important Considerations
+
+Path and PlateID Matching
+Search each line of the text for substrings that match either a Path from directory_list or a plate_id from plate_files.
+If a match is found, update the path with the full path from directory_list.
+Include only the plate_files entries that were matched and updated in the updated_plate_files array.
+If no matches are found, return an empty array: "updated_plate_files": [].
+Specificity
+Only update paths for plate_ids or paths explicitly mentioned in the text.
+Do not infer updates based on general context—require explicit mentions.
+Instructions
+
+Read the text enclosed in <text> tags carefully.
+Search for Path or PlateID clues in each line and update paths in plate_files as needed.
+Return the JSON object with only the updated_plate_files array.
+Do not include any additional text, explanations, or comments outside of the JSON object.
