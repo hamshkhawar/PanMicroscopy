@@ -47,3 +47,7 @@ Read the text enclosed in <text> tags carefully.
 Search for Path or PlateID clues in each line and update paths in plate_files as needed.
 Return the JSON object with only the updated_plate_files array.
 Do not include any additional text, explanations, or comments outside of the JSON object.
+Exclude any file named plate.txt from the Path.
+Verify if the Path associated with each PlateID contains files.
+If the Path is empty, or if it doesnot contain files check if appending the PlateID to the Path results in a valid location that contains files.
+Do not return empty file

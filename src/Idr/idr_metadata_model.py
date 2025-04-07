@@ -1,11 +1,12 @@
 """
 A script to fetch and process TSV/CSV files from a GitHub repository, including submodules.
 Can process a specific dataset or all datasets in the repository.
+Now combines multiple plates.tsv files into a single CSV for each study.
 """
 
 from github import Github, GithubException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict
 import pandas as pd
 from io import StringIO, BytesIO
 from pathlib import Path
@@ -36,6 +37,8 @@ class GitHubRepo:
         self.out_dir = out_dir
         self.root = root
         self.access_token = access_token
+        # Dictionary to store dataframes for each study
+        self.study_plates_data: Dict[str, List[pd.DataFrame]] = {}
 
     def get_gitmodules_content(self) -> Optional[str]:
         """Fetch the contents of the .gitmodules file."""
@@ -226,10 +229,62 @@ class GitHubRepo:
     def modify_path(self, path):
         if "/uod/idr/filesets/" in path:
             new_path = Path(self.root) / path.split("filesets/")[1]
-            return str(Path(new_path).parent)
-        else:
+            if Path(new_path).suffix:
+                return str(Path(new_path).parent)
+            return str(Path(new_path))
+                
+        elif "../" in path:
             new_path = Path(self.root) / path.split("../", 1)[-1] if "../" in path else path
-            return str(Path(new_path).parent)
+            if "screen" in Path(new_path).suffix:
+                return str(Path(new_path).with_suffix(""))
+            if not "screen" in Path(new_path).suffix:
+                return str(Path(new_path).parent)
+            return str(Path(new_path))
+        else:
+            new_path = Path(self.root) / path
+            if Path(new_path).suffix:
+                return str(Path(new_path).parent)
+            return str(Path(new_path))
+            
+    def save_combined_plates(self):
+        """Save combined plates data for each study."""
+        for study_name, dfs in self.study_plates_data.items():
+            if not dfs or len(dfs) == 0:
+                logging.warning(f"No plate data found for study {study_name}")
+                continue
+                
+            logging.info(f"Combining {len(dfs)} plate files for study {study_name}")
+            
+            try:
+                # Concatenate all dataframes for this study
+                combined_df = pd.concat(dfs, ignore_index=True)
+                
+                # Remove duplicates if any
+                before_dedup_count = len(combined_df)
+                combined_df = combined_df.drop_duplicates()
+                after_dedup_count = len(combined_df)
+                
+                if before_dedup_count > after_dedup_count:
+                    logging.info(f"Removed {before_dedup_count - after_dedup_count} duplicate rows")
+                
+                # Create output directory
+                combined_dir = self.out_dir.joinpath("combined_plates")
+                combined_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Save combined file
+                combined_path = combined_dir.joinpath(f"{study_name}_combined_plates.csv")
+                combined_df.to_csv(combined_path, index=False)
+                logging.info(f"Successfully saved combined plates data to {combined_path}, total rows: {len(combined_df)}")
+            except Exception as e:
+                logging.error(f"Error combining plates data for study {study_name}: {e}")
+
+    def store_plates_df(self, study_name: str, df: pd.DataFrame):
+        """Store a plates dataframe for later combination."""
+        if study_name not in self.study_plates_data:
+            self.study_plates_data[study_name] = []
+        
+        self.study_plates_data[study_name].append(df)
+        logging.info(f"Stored plates data for study {study_name}, now have {len(self.study_plates_data[study_name])} files")
 
     def get_files_in_submodule(self, submodule: Submodule) -> None:
         """Retrieve TSV and CSV files in the submodule at the specified commit."""
@@ -285,6 +340,9 @@ class GitHubRepo:
                                     plate_path = outpath.joinpath(f"{Path(element.path).stem}.csv")
                                     df.to_csv(plate_path, index=False)
                                     logging.info(f"Successfully saved plate data to {plate_path}")
+                                    
+                                    # Store for later combination
+                                    self.store_plates_df(submodule.path, df)
                                 else:
                                     logging.warning(f"TSV file {current_path} has insufficient columns: {df.columns}")
                             except Exception as e:
@@ -379,6 +437,9 @@ class GitHubRepo:
                                     plate_path = outpath.joinpath(f"{Path(content_file.name).stem}.csv")
                                     df.to_csv(plate_path, index=False)
                                     logging.info(f"Successfully saved plate data to {plate_path}")
+                                    
+                                    # Store for later combination
+                                    self.store_plates_df(name, df)
                                 else:
                                     logging.warning(f"TSV file {current_path} has insufficient columns: {df.columns}")
                             except Exception as e:
@@ -450,6 +511,9 @@ class GitHubRepo:
         for dir_name in root_dirs:
             logging.info(f"Processing directory: {dir_name}")
             self.get_files_from_repo(dir_name)
+        
+        # After processing all studies, combine plates files for each study
+        self.save_combined_plates()
 
 @app.command()
 def main(
@@ -492,8 +556,10 @@ def main(
     # Create output directories if they don't exist
     annotations_dir = out_dir.joinpath("annotations")
     plates_dir = out_dir.joinpath("plates")
+    combined_dir = out_dir.joinpath("combined_plates")
     annotations_dir.mkdir(parents=True, exist_ok=True)
     plates_dir.mkdir(parents=True, exist_ok=True)
+    combined_dir.mkdir(parents=True, exist_ok=True)
     
     logging.info(f"Starting GitHub repository processing")
     logging.info(f"Output directory: {out_dir}")
@@ -530,6 +596,9 @@ def main(
         else:
             logging.info("No .gitmodules file found, processing as a directory in the main repository")
             github_repo.get_files_from_repo(name)
+        
+        # After processing the specific study, combine its plates files
+        github_repo.save_combined_plates()
     
     logging.info("Processing completed")
 
